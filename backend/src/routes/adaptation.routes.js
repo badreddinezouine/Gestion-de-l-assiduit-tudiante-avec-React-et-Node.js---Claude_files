@@ -1,14 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth.middleware');
-const adaptationController = require('../controllers/adaptationController');
 
-// Routes pour les professeurs
-router.post('/', protect, authorize('PROFESSEUR'), adaptationController.createAdaptation);
-router.get('/student/:studentId', protect, authorize('PROFESSEUR'), adaptationController.getStudentAdaptations);
-router.get('/course/:courseId', protect, authorize('PROFESSEUR'), adaptationController.getCourseAdaptations);
+const qrController = require('../controllers/qrController');
+const { protect, checkRole } = require('../middleware/auth');
 
-// Routes pour les étudiants
-router.get('/my-adaptations', protect, authorize('ETUDIANT'), adaptationController.getMyAdaptations);
+// PROFESSEUR : générer QR
+router.post('/generate', protect, checkRole('PROFESSEUR'), qrController.generateQRCode);
+
+// ETUDIANT : scanner QR
+router.post('/scan', protect, checkRole('ETUDIANT'), qrController.scanQRCode);
 
 module.exports = router;

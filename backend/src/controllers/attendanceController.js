@@ -1,49 +1,34 @@
-const Attendance = require('../models/Attendance');
+const mongoose = require('mongoose');
 const Presence = require('../models/Presence');
-const Absence = require('../models/Absence');
-const SessionCours = require('../models/SessionCours');
 
 exports.getMyAttendance = async (req, res) => {
   try {
-    const studentId = req.user.studentId || req.user.id;
-    
-    const attendance = await Presence.find({ etudiantId: studentId })
-      .populate('sessionCoursId', 'dateDebut coursId')
-      .populate({
-        path: 'sessionCoursId',
-        populate: { path: 'coursId', select: 'intitule code' }
-      })
-      .sort({ dateScan: -1 });
+    const etudiantId = req.user?.id || req.query.etudiantId;
 
-    res.json({
-      success: true,
-      attendance
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+    if (!etudiantId) {
+      return res.status(400).json({ success: false, error: 'etudiantId requis' });
+    }
 
-exports.reportAbsence = async (req, res) => {
-  try {
-    const { sessionCoursId, motif, document } = req.body;
-    const studentId = req.user.studentId || req.user.id;
+    const studentId = mongoose.Types.ObjectId.isValid(etudiantId)
+      ? new mongoose.Types.ObjectId(etudiantId)
+      : etudiantId;
 
-    const absence = await Absence.create({
-      etudiantId: studentId,
-      sessionCoursId,
-      motif,
-      documentJustificatif: document,
-      justifiee: false
-    });
+    const rows = await Presence.find({ etudiantId: studentId })
+      .populate('coursId', 'intitule code')
+      .populate('sessionCoursId', 'dateDebut')
+      .sort({ dateScan: -1 })
+      .limit(200);
 
-    res.json({
-      success: true,
-      message: 'Absence signalée',
-      absence
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.json(
+      rows.map((r) => ({
+        cours: r.coursId ? `${r.coursId.intitule} (${r.coursId.code})` : 'Cours',
+        date: r.sessionCoursId?.dateDebut || r.dateScan,
+        statut: r.statut,
+      }))
+    );
+  } catch (err) {
+    console.error('getMyAttendance error:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -51,43 +36,48 @@ exports.getCourseAttendance = async (req, res) => {
   try {
     const { courseId } = req.params;
 
-    const attendance = await Presence.find()
-      .populate({
-        path: 'sessionCoursId',
-        match: { coursId: courseId },
-        populate: { path: 'coursId', select: 'intitule' }
-      })
-      .populate('etudiantId', 'nom prenom');
+    if (!courseId) {
+      return res.status(400).json({ success: false, error: 'courseId requis' });
+    }
 
-    res.json({
-      success: true,
-      attendance: attendance.filter(a => a.sessionCoursId)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const cid = mongoose.Types.ObjectId.isValid(courseId)
+      ? new mongoose.Types.ObjectId(courseId)
+      : courseId;
+
+    const rows = await Presence.find({ coursId: cid })
+      .populate('coursId', 'intitule code')
+      .populate('sessionCoursId', 'dateDebut salle')
+      .populate('etudiantId', 'nom prenom email numeroEtudiant')
+      .sort({ dateScan: -1 })
+      .limit(500);
+
+    return res.json({ success: true, rows });
+  } catch (err) {
+    console.error('getCourseAttendance error:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-exports.getAttendanceStats = async (req, res) => {
+exports.addManualAttendance = async (req, res) => {
   try {
-    const { courseId } = req.params;
+    const { etudiantId, coursId, sessionCoursId, statut = 'PRESENT' } = req.body;
 
-    // Logique simplifiée pour les statistiques
-    const stats = {
-      totalSessions: 10,
-      averageAttendance: 85,
-      topStudents: [
-        { name: 'Badr Zouine', attendance: 95 },
-        { name: 'Marouane Moumen', attendance: 90 },
-        { name: 'John Doe', attendance: 87 }
-      ]
-    };
+    if (!etudiantId || !coursId) {
+      return res.status(400).json({ success: false, error: 'etudiantId et coursId requis' });
+    }
 
-    res.json({
-      success: true,
-      stats
+    const doc = await Presence.create({
+      etudiantId,
+      coursId,
+      sessionCoursId: sessionCoursId || null,
+      statut,
+      dateScan: new Date(),
+      source: 'MANUAL',
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    return res.status(201).json({ success: true, presence: doc });
+  } catch (err) {
+    console.error('addManualAttendance error:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };

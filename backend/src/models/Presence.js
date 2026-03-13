@@ -1,48 +1,54 @@
 const mongoose = require('mongoose');
 
-const presenceSchema = new mongoose.Schema({
-  etudiantId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Student',
-    required: true
+const presenceSchema = new mongoose.Schema(
+  {
+    etudiantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    coursId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Course',
+      required: true,
+      index: true,
+    },
+    sessionCoursId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SessionCours',
+      default: null,
+      index: true,
+    },
+    statut: {
+      type: String,
+      enum: ['PRESENT', 'RETARD', 'ABSENT'],
+      required: true,
+      default: 'PRESENT',
+    },
+    dateScan: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+    source: {
+      type: String,
+      enum: ['QR', 'MANUAL'],
+      default: 'QR',
+    },
   },
-  sessionCoursId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'SessionCours',
-    required: true
-  },
-  qrCodeId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'QRCode'
-  },
-  dateScan: {
-    type: Date,
-    default: Date.now
-  },
-  statut: {
-    type: String,
-    enum: ['PRESENT', 'RETARD', 'ABSENT'],
-    default: 'PRESENT'
-  },
-  latitude: Number,
-  longitude: Number,
-  heureScan: {
-    type: String
-  },
-  ipAdresse: String
-}, {
-  timestamps: true
-});
-
-// Index composé pour éviter les doublons
-presenceSchema.index({ etudiantId: 1, sessionCoursId: 1 }, { unique: true });
-
-// Middleware pour définir l'heure du scan
-presenceSchema.pre('save', function(next) {
-  if (!this.heureScan) {
-    this.heureScan = new Date().toLocaleTimeString('fr-FR');
+  {
+    timestamps: true,
   }
-  next();
-});
+);
+
+// Empêche un étudiant d'avoir 2 présences pour la même séance
+presenceSchema.index(
+  { etudiantId: 1, sessionCoursId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { sessionCoursId: { $type: 'objectId' } },
+  }
+);
 
 module.exports = mongoose.model('Presence', presenceSchema);

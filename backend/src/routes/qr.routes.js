@@ -1,23 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { 
-  generateQRCode, 
-  scanQRCode, 
-  getSessionQRCodes, 
-  deactivateQRCode 
-} = require('../controllers/qrController');
-const { protect, authorize } = require('../middleware/auth.middleware');
 
-// Générer QR Code (professeurs seulement)
-router.post('/generate', protect, authorize('PROFESSEUR'), generateQRCode);
+const qrController = require('../controllers/qrController');
+const { protect, checkRole } = require('../middleware/auth');
 
-// Scanner QR Code (étudiants seulement)
-router.post('/scan', protect, authorize('ETUDIANT'), scanQRCode);
+// PROFESSEUR : générer QR
+router.post('/generate', protect, checkRole('PROFESSEUR'), qrController.generateQRCode);
 
-// Obtenir les QR Codes d'une session
-router.get('/session/:sessionCoursId', protect, getSessionQRCodes);
-
-// Désactiver un QR Code
-router.put('/deactivate/:qrCodeId', protect, authorize('PROFESSEUR'), deactivateQRCode);
+// ETUDIANT : scanner QR
+router.post('/scan', protect, checkRole('ETUDIANT'), qrController.scanQRCode);
 
 module.exports = router;

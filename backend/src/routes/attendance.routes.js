@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth.middleware');
+
 const attendanceController = require('../controllers/attendanceController');
+const { protect, checkRole } = require('../middleware/auth');
 
-// Routes pour les étudiants
-router.get('/my-attendance', protect, authorize('ETUDIANT'), attendanceController.getMyAttendance);
-router.post('/absence', protect, authorize('ETUDIANT'), attendanceController.reportAbsence);
+// ETUDIANT : mon historique
+router.get('/my-attendance', protect, checkRole('ETUDIANT'), attendanceController.getMyAttendance);
 
-// Routes pour les professeurs
-router.get('/course/:courseId', protect, authorize('PROFESSEUR'), attendanceController.getCourseAttendance);
-router.get('/stats/:courseId', protect, authorize('PROFESSEUR'), attendanceController.getAttendanceStats);
+// PROFESSEUR : présences d’un cours
+router.get('/course/:courseId', protect, checkRole('PROFESSEUR'), attendanceController.getCourseAttendance);
+
+// PROFESSEUR : ajout manuel
+router.post('/manual', protect, checkRole('PROFESSEUR'), attendanceController.addManualAttendance);
 
 module.exports = router;

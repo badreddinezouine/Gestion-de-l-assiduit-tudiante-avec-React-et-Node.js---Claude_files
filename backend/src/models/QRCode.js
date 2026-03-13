@@ -1,52 +1,40 @@
 const mongoose = require('mongoose');
 
-const qrCodeSchema = new mongoose.Schema({
-  sessionCoursId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'SessionCours',
-    required: true
+const qrCodeSchema = new mongoose.Schema(
+  {
+    code: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+      trim: true,
+    },
+    sessionCoursId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SessionCours',
+      required: true,
+      index: true,
+    },
+    expiration: {
+      type: Date,
+      required: true,
+      index: true,
+    },
+    scans: {
+      type: Number,
+      default: 0,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  code: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  dateGeneration: {
-    type: Date,
-    default: Date.now
-  },
-  dateExpiration: {
-    type: Date,
-    required: true
-  },
-  dureeValidite: {
-    type: Number,
-    default: 10
-  },
-  actif: {
-    type: Boolean,
-    default: true
-  },
-  nombreScans: {
-    type: Number,
-    default: 0
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+);
 
-// Index TTL pour expiration automatique
-qrCodeSchema.index({ dateExpiration: 1 }, { expireAfterSeconds: 0 });
-
-// Méthode pour vérifier la validité
-qrCodeSchema.methods.isValide = function() {
-  return this.actif && new Date() < this.dateExpiration;
-};
-
-// Méthode pour incrémenter les scans
-qrCodeSchema.methods.incrementScans = function() {
-  this.nombreScans += 1;
-  return this.save();
-};
+// Supprime automatiquement le QR après expiration
+qrCodeSchema.index({ expiration: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('QRCode', qrCodeSchema);

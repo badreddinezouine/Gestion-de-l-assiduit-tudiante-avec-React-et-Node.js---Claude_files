@@ -6,7 +6,7 @@ const {
   getDecisionHistory,
   getCourseRecommendations 
 } = require('../controllers/chatbotController');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize } = require('../middleware/auth');
 
 // Analyser un étudiant
 router.post('/analyze', protect, authorize('PROFESSEUR'), analyzeStudent);
