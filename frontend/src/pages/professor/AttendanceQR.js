@@ -14,6 +14,7 @@ import {
   Stack,
   Divider,
   IconButton,
+  CircularProgress,
 } from '@mui/material';
 import {
   QrCode as QrCodeIcon,
@@ -25,23 +26,8 @@ import {
 } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { qrService } from '../../services/qrService';
+import { courseService } from '../../services/courseService'; // ✅ API réelle
 import { useAuth } from '../../context/AuthContext';
-
-const LS_KEYS = {
-  courses: 'pfe_courses',
-  qrHistory: 'pfe_qr_history',
-};
-
-const loadLS = (key, fallback) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const saveLS = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
 const formatDateTime = (iso) => {
   const dt = new Date(iso);
@@ -56,38 +42,38 @@ const formatDateTime = (iso) => {
 
 export default function AttendanceQR() {
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
 
-  const [courses, setCourses] = useState([]);
-  const [courseId, setCourseId] = useState('');
-  const [sessionId, setSessionId] = useState('');
+  // ✅ Données venant de l'API (MongoDB Atlas) — plus de localStorage
+  const [courses,     setCourses]     = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+
+  const [courseId,      setCourseId]      = useState('');
+  const [sessionId,     setSessionId]     = useState('');
   const [dureeValidite, setDureeValidite] = useState(10);
 
-  const [loading, setLoading] = useState(false);
-  const [qr, setQr] = useState(null);
-  const [error, setError] = useState('');
+  const [loading,      setLoading]      = useState(false);
+  const [qr,           setQr]           = useState(null);
+  const [error,        setError]        = useState('');
   const [remainingSec, setRemainingSec] = useState(null);
 
-  const professorId = user?.id || '1';
-
-  // Load local courses
+  // ── Chargement des cours depuis MongoDB Atlas ──────────────
   useEffect(() => {
-    const c = loadLS(LS_KEYS.courses, []);
-    setCourses(Array.isArray(c) ? c : []);
+    courseService.getMyCourses()
+      .then((data) => setCourses(data))
+      .catch(() => setError('Impossible de charger les cours'))
+      .finally(() => setLoadingData(false));
   }, []);
 
-  const myCourses = useMemo(
-    () => (courses || []).filter((c) => c.professeurId === professorId),
-    [courses, professorId]
-  );
-
+  // ── Séances du cours sélectionné ──────────────────────────
+  // ✅ Utilise _id (ObjectId MongoDB réel)
   const sessionsForSelectedCourse = useMemo(() => {
-    const course = myCourses.find((c) => c.id === courseId);
+    const course = courses.find((c) => c._id === courseId);
     return course?.sessions || [];
-  }, [myCourses, courseId]);
+  }, [courses, courseId]);
 
-  // Prefill from query param ?sessionId=
+  // ── Pré-remplissage depuis ?sessionId= ────────────────────
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sid = params.get('sessionId');
@@ -95,20 +81,21 @@ export default function AttendanceQR() {
 
     setSessionId(sid);
 
-    // Try to find matching course
-    const foundCourse = myCourses.find((c) => (c.sessions || []).some((s) => s.id === sid));
-    if (foundCourse) setCourseId(foundCourse.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, myCourses.length]);
+    // Trouver le cours correspondant
+    const foundCourse = courses.find((c) =>
+      (c.sessions || []).some((s) => s._id === sid)
+    );
+    if (foundCourse) setCourseId(foundCourse._id);
+  }, [location.search, courses]);
 
-  const isExpired = (expirationIso) => new Date(expirationIso).getTime() <= Date.now();
-
-  // Countdown
+  // ── Countdown expiration ──────────────────────────────────
   useEffect(() => {
     if (!qr?.expiration) return;
 
     const tick = () => {
-      const diff = Math.floor((new Date(qr.expiration).getTime() - Date.now()) / 1000);
+      const diff = Math.floor(
+        (new Date(qr.expiration).getTime() - Date.now()) / 1000
+      );
       setRemainingSec(diff);
     };
 
@@ -117,44 +104,49 @@ export default function AttendanceQR() {
     return () => clearInterval(id);
   }, [qr]);
 
+  const isExpired = (expirationIso) =>
+    new Date(expirationIso).getTime() <= Date.now();
+
+  // ── Historique QR (en mémoire session) ───────────────────
+  const [qrHistory, setQrHistory] = useState([]);
+
   const pushHistory = (qrData) => {
-    const hist = loadLS(LS_KEYS.qrHistory, []);
-    const next = [
+    setQrHistory((prev) => [
       {
-        id: qrData.id || `${Date.now()}`,
-        professeurId,
+        id:           qrData.id || `${Date.now()}`,
         sessionCoursId: sessionId,
         courseId,
-        code: qrData.code,
-        expiration: qrData.expiration,
-        dureeValidite: qrData.dureeValidite,
-        createdAt: new Date().toISOString(),
+        code:         qrData.code,
+        expiration:   qrData.expiration,
+        createdAt:    new Date().toISOString(),
       },
-      ...(Array.isArray(hist) ? hist : []),
-    ].slice(0, 50);
-
-    saveLS(LS_KEYS.qrHistory, next);
+      ...prev,
+    ].slice(0, 50));
   };
 
-  const historyForSession = useMemo(() => {
-    const hist = loadLS(LS_KEYS.qrHistory, []);
-    return (Array.isArray(hist) ? hist : []).filter((h) => h.sessionCoursId === sessionId);
-  }, [sessionId]);
+  const historyForSession = useMemo(
+    () => qrHistory.filter((h) => h.sessionCoursId === sessionId),
+    [qrHistory, sessionId]
+  );
 
+  // ── Générer le QR Code ────────────────────────────────────
   const handleGenerate = async () => {
     setError('');
     setQr(null);
     setRemainingSec(null);
 
     if (!sessionId.trim()) {
-      setError('Veuillez sélectionner (ou saisir) une séance.');
+      setError('Veuillez sélectionner une séance.');
       return;
     }
 
     setLoading(true);
     try {
-      const data = await qrService.generateQRCode(sessionId.trim(), Number(dureeValidite) || 10);
-      // backend -> { success:true, qrCode:{...} }
+      // ✅ sessionId est maintenant un vrai ObjectId MongoDB
+      const data = await qrService.generateQRCode(
+        sessionId.trim(),
+        Number(dureeValidite) || 10
+      );
       const qrCode = data.qrCode || data;
       setQr(qrCode);
       pushHistory(qrCode);
@@ -169,12 +161,20 @@ export default function AttendanceQR() {
     try {
       await navigator.clipboard.writeText(qr?.code || '');
     } catch {
-      // fallback
       window.prompt('Copiez le code QR :', qr?.code || '');
     }
   };
 
-  const selectedCourse = myCourses.find((c) => c.id === courseId);
+  const selectedCourse = courses.find((c) => c._id === courseId);
+
+  // ── Affichage chargement ──────────────────────────────────
+  if (loadingData) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Container maxWidth="lg">
@@ -184,24 +184,31 @@ export default function AttendanceQR() {
         </Typography>
 
         <Alert severity="info" sx={{ mb: 2 }}>
-          Sélectionne une séance, puis génère un QR Code valide pendant une durée limitée.
-          Les étudiants pourront le scanner sur <b>Scanner QR</b>.
+          Sélectionne une séance, puis génère un QR Code valide pendant une
+          durée limitée. Les étudiants pourront le scanner sur{' '}
+          <b>Scanner QR</b>.
         </Alert>
 
-        {myCourses.length === 0 && (
+        {courses.length === 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            Aucun cours trouvé en localStorage. Va d’abord dans <b>Gestion des cours</b> pour créer
-            des séances, ou saisis une séance manuellement.
+            Aucun cours trouvé. Va d'abord dans{' '}
+            <b>Gestion des cours</b> pour créer des cours et des séances.
             <Box sx={{ mt: 1 }}>
-              <Button variant="outlined" onClick={() => navigate('/professor/courses')}>
+              <Button
+                variant="outlined"
+                onClick={() => navigate('/professor/courses')}
+              >
                 Aller à Gestion des cours
               </Button>
             </Box>
           </Alert>
         )}
 
+        {/* ── Formulaire sélection ── */}
         <Paper sx={{ p: 2 }}>
           <Grid container spacing={2} alignItems="center">
+
+            {/* Cours */}
             <Grid item xs={12} md={4}>
               <TextField
                 select
@@ -212,38 +219,46 @@ export default function AttendanceQR() {
                   setCourseId(e.target.value);
                   setSessionId('');
                 }}
-                disabled={myCourses.length === 0}
+                disabled={courses.length === 0}
+                SelectProps={{ native: true }}
               >
-                {myCourses.map((c) => (
-                  <option key={c.id} value={c.id}>
+                <option value="">-- Choisir un cours --</option>
+                {courses.map((c) => (
+                  // ✅ Utilise c._id (ObjectId MongoDB)
+                  <option key={c._id} value={c._id}>
                     {c.intitule} ({c.code})
                   </option>
                 ))}
               </TextField>
             </Grid>
 
+            {/* Séance */}
             <Grid item xs={12} md={4}>
               <TextField
-                select={sessionsForSelectedCourse.length > 0}
+                select
                 fullWidth
                 label="Séance"
                 value={sessionId}
                 onChange={(e) => setSessionId(e.target.value)}
-                placeholder="Saisir un ID séance (ex: session_123)"
                 helperText={
                   sessionsForSelectedCourse.length === 0
-                    ? 'Aucune séance : tu peux saisir un ID manuel.'
+                    ? 'Sélectionnez d\'abord un cours.'
                     : 'Choisir une séance créée.'
                 }
+                disabled={sessionsForSelectedCourse.length === 0}
+                SelectProps={{ native: true }}
               >
+                <option value="">-- Choisir une séance --</option>
                 {sessionsForSelectedCourse.map((s) => (
-                  <option key={s.id} value={s.id}>
+                  // ✅ Utilise s._id (ObjectId MongoDB réel) → plus d'erreur Cast!
+                  <option key={s._id} value={s._id}>
                     {formatDateTime(s.dateDebut)} • Salle {s.salle}
                   </option>
                 ))}
               </TextField>
             </Grid>
 
+            {/* Validité */}
             <Grid item xs={12} md={2}>
               <TextField
                 type="number"
@@ -255,26 +270,29 @@ export default function AttendanceQR() {
               />
             </Grid>
 
+            {/* Bouton */}
             <Grid item xs={12} md={2}>
               <Button
                 fullWidth
                 variant="contained"
                 startIcon={<QrCodeIcon />}
                 onClick={handleGenerate}
-                disabled={loading}
+                disabled={loading || !sessionId}
               >
-                Générer
+                {loading ? 'Génération...' : 'Générer'}
               </Button>
             </Grid>
           </Grid>
         </Paper>
 
+        {/* Erreur */}
         {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
+          <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError('')}>
             {error}
           </Alert>
         )}
 
+        {/* ── Résultat QR ── */}
         {qr && (
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12} md={6}>
@@ -298,8 +316,10 @@ export default function AttendanceQR() {
                     ) : (
                       <Chip icon={<CheckCircleIcon />} label="Actif" color="success" />
                     )}
-
-                    <Chip icon={<EventIcon />} label={`Expire : ${formatDateTime(qr.expiration)}`} />
+                    <Chip
+                      icon={<EventIcon />}
+                      label={`Expire : ${formatDateTime(qr.expiration)}`}
+                    />
                     {typeof remainingSec === 'number' && (
                       <Chip
                         label={`Restant : ${Math.max(0, remainingSec)}s`}
@@ -318,7 +338,11 @@ export default function AttendanceQR() {
                   </Paper>
 
                   <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-                    <Button variant="outlined" startIcon={<CopyIcon />} onClick={handleCopy}>
+                    <Button
+                      variant="outlined"
+                      startIcon={<CopyIcon />}
+                      onClick={handleCopy}
+                    >
                       Copier le code
                     </Button>
                     <Button
@@ -333,13 +357,15 @@ export default function AttendanceQR() {
 
                   {selectedCourse && (
                     <Alert severity="info" sx={{ mt: 2 }}>
-                      Cours : <b>{selectedCourse.intitule}</b> • Séance : <b>{sessionId}</b>
+                      Cours : <b>{selectedCourse.intitule}</b> — Séance ID :{' '}
+                      <b>{sessionId}</b>
                     </Alert>
                   )}
                 </CardContent>
               </Card>
             </Grid>
 
+            {/* Historique */}
             <Grid item xs={12} md={6}>
               <Card variant="outlined">
                 <CardContent>
@@ -347,7 +373,7 @@ export default function AttendanceQR() {
                     Historique (séance)
                   </Typography>
 
-                  {(historyForSession || []).length === 0 ? (
+                  {historyForSession.length === 0 ? (
                     <Typography variant="body2" color="text.secondary">
                       Aucun QR code généré pour cette séance.
                     </Typography>
@@ -359,7 +385,8 @@ export default function AttendanceQR() {
                             {h.code}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Créé : {formatDateTime(h.createdAt)} • Expire : {formatDateTime(h.expiration)}
+                            Créé : {formatDateTime(h.createdAt)} • Expire :{' '}
+                            {formatDateTime(h.expiration)}
                           </Typography>
                         </Paper>
                       ))}

@@ -1,10 +1,8 @@
-const User = require('../models/User');
+const User      = require('../models/User');
 const Professor = require('../models/Professor');
-const Student = require('../models/Student');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const Student   = require('../models/Student');
+const jwt       = require('jsonwebtoken');
 
-// Générer un token JWT
 const generateToken = (id, role) => {
   return jwt.sign(
     { id, role },
@@ -13,172 +11,227 @@ const generateToken = (id, role) => {
   );
 };
 
-// Inscription
+const generateNumeroEtudiant = () => {
+  const year   = new Date().getFullYear();
+  const random = Math.floor(Math.random() * 90000) + 10000;
+  return `ETU${year}${random}`;
+};
+
+// ─────────────────────────────────────────────────────────────
+//  POST /api/auth/register
+// ─────────────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    const { email, motDePasse, nom, prenom, role, telephone, ...additionalData } = req.body;
+    const {
+      email, motDePasse, nom, prenom, role, telephone,
+      // Champs étudiant
+      filiere, niveau, numeroEtudiant, dateNaissance,
+      // Champs professeur
+      specialite, departement, grade
+    } = req.body;
 
-    // Vérifier si l'utilisateur existe déjà
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+    // Vérifier champs obligatoires communs
+    if (!email || !motDePasse || !nom || !prenom || !role) {
+      return res.status(400).json({
+        success: false,
+        error: 'Champs obligatoires manquants : email, motDePasse, nom, prenom, role'
+      });
     }
 
-    // Créer l'utilisateur
+    // ✅ Vérifier champs obligatoires étudiant
+    if (role === 'ETUDIANT') {
+      if (!filiere || !filiere.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'La filière est obligatoire pour un étudiant'
+        });
+      }
+      if (!niveau) {
+        return res.status(400).json({
+          success: false,
+          error: 'Le niveau est obligatoire pour un étudiant'
+        });
+      }
+    }
+
+    // Vérifier si email déjà utilisé
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cet email est déjà utilisé'
+      });
+    }
+
+    // Créer l'utilisateur de base
     const user = await User.create({
       email,
       motDePasse,
       nom,
       prenom,
       role,
-      telephone
+      telephone: telephone || ''
     });
 
-    // Créer le profil spécifique selon le rôle
+    // Créer le profil selon le rôle
     if (role === 'PROFESSEUR') {
       await Professor.create({
         utilisateurId: user._id,
-        specialite: additionalData.specialite || 'Non spécifiée',
-        departement: additionalData.departement || 'Non spécifié',
-        grade: additionalData.grade || 'MAITRE_ASSISTANT'
+        specialite:    specialite  || 'Non spécifiée',
+        departement:   departement || 'Non spécifié',
+        grade:         grade       || 'MAITRE_ASSISTANT'
       });
+
     } else if (role === 'ETUDIANT') {
       await Student.create({
-        utilisateurId: user._id,
-        numeroEtudiant: additionalData.numeroEtudiant,
-        niveau: additionalData.niveau,
-        filiere: additionalData.filiere,
-        dateNaissance: additionalData.dateNaissance
+        utilisateurId:  user._id,
+        numeroEtudiant: numeroEtudiant || generateNumeroEtudiant(),
+        filiere:        filiere.trim(), // ✅ obligatoire
+        niveau,                         // ✅ obligatoire
+        dateNaissance:  dateNaissance || null
       });
     }
 
-    // Générer le token
     const token = generateToken(user._id, user.role);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       token,
       user: {
-        id: user._id,
-        email: user.email,
-        nom: user.nom,
+        id:     user._id,
+        email:  user.email,
+        nom:    user.nom,
         prenom: user.prenom,
-        role: user.role
+        role:   user.role
       }
     });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Register error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };
 
-// Connexion
+// ─────────────────────────────────────────────────────────────
+//  POST /api/auth/login
+// ─────────────────────────────────────────────────────────────
 exports.login = async (req, res) => {
   try {
     const { email, motDePasse } = req.body;
 
-    // Vérifier si l'utilisateur existe
+    if (!email || !motDePasse) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email et mot de passe requis'
+      });
+    }
+
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(401).json({ error: 'Identifiants invalides' });
+      return res.status(401).json({
+        success: false,
+        error: 'Identifiants invalides'
+      });
     }
 
-    // Vérifier le mot de passe
     const isMatch = await user.comparePassword(motDePasse);
     if (!isMatch) {
-      return res.status(401).json({ error: 'Identifiants invalides' });
+      return res.status(401).json({
+        success: false,
+        error: 'Identifiants invalides'
+      });
     }
 
-    // Vérifier si le compte est actif
     if (!user.actif) {
-      return res.status(403).json({ error: 'Compte désactivé' });
+      return res.status(403).json({
+        success: false,
+        error: 'Compte désactivé'
+      });
     }
 
-    // Générer le token
     const token = generateToken(user._id, user.role);
 
-    // Récupérer les données supplémentaires selon le rôle
     let additionalData = {};
     if (user.role === 'PROFESSEUR') {
       const professor = await Professor.findOne({ utilisateurId: user._id });
-      additionalData = professor;
+      if (professor) additionalData = professor.toObject();
     } else if (user.role === 'ETUDIANT') {
       const student = await Student.findOne({ utilisateurId: user._id });
-      additionalData = student;
+      if (student) additionalData = student.toObject();
     }
 
-    res.json({
+    return res.json({
       success: true,
       token,
       user: {
-        id: user._id,
-        email: user.email,
-        nom: user.nom,
+        id:     user._id,
+        email:  user.email,
+        nom:    user.nom,
         prenom: user.prenom,
-        role: user.role,
+        role:   user.role,
         ...additionalData
       }
     });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Login error:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Profil utilisateur
+// ─────────────────────────────────────────────────────────────
+//  GET /api/auth/profile
+// ─────────────────────────────────────────────────────────────
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-motDePasse');
-    
     if (!user) {
-      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+      return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
     }
 
     let profileData = {
-      id: user._id,
-      email: user.email,
-      nom: user.nom,
-      prenom: user.prenom,
-      role: user.role,
+      id:        user._id,
+      email:     user.email,
+      nom:       user.nom,
+      prenom:    user.prenom,
+      role:      user.role,
       telephone: user.telephone
     };
 
-    // Ajouter les données spécifiques au rôle
     if (user.role === 'PROFESSEUR') {
       const professor = await Professor.findOne({ utilisateurId: user._id });
-      profileData = { ...profileData, ...professor.toObject() };
+      if (professor) profileData = { ...profileData, ...professor.toObject() };
     } else if (user.role === 'ETUDIANT') {
       const student = await Student.findOne({ utilisateurId: user._id });
-      profileData = { ...profileData, ...student.toObject() };
+      if (student) profileData = { ...profileData, ...student.toObject() };
     }
 
-    res.json({
-      success: true,
-      user: profileData
-    });
+    return res.json({ success: true, user: profileData });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Mettre à jour le profil
+// ─────────────────────────────────────────────────────────────
+//  PUT /api/auth/profile
+// ─────────────────────────────────────────────────────────────
 exports.updateProfile = async (req, res) => {
   try {
-    const updates = req.body;
-    
-    // Supprimer les champs non modifiables
+    const updates = { ...req.body };
     delete updates.email;
     delete updates.role;
-    
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
       updates,
       { new: true, runValidators: true }
     ).select('-motDePasse');
 
-    res.json({
-      success: true,
-      user
-    });
+    return res.json({ success: true, user });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
   }
 };

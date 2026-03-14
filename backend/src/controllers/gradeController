@@ -1,0 +1,113 @@
+const Grade     = require('../models/Grade');
+const Course    = require('../models/Course');
+const Professor = require('../models/Professor');
+const User      = require('../models/User');
+
+// ─────────────────────────────────────────────────────────────
+//  POST /api/grades  → créer une évaluation
+// ─────────────────────────────────────────────────────────────
+exports.createGrade = async (req, res) => {
+  try {
+    const professor = await Professor.findOne({ utilisateurId: req.user.id });
+    if (!professor) {
+      return res.status(404).json({ success: false, error: 'Profil professeur non trouvé' });
+    }
+
+    const { coursId, etudiantId, typeEvaluation, note, typeParticipation, commentaire } = req.body;
+
+    if (!coursId || !etudiantId) {
+      return res.status(400).json({ success: false, error: 'coursId et etudiantId requis' });
+    }
+
+    const grade = await Grade.create({
+      professeurId:    professor._id,
+      coursId,
+      etudiantId,
+      typeEvaluation:  typeEvaluation  || 'EXAMEN',
+      note:            note            ?? null,
+      typeParticipation: typeParticipation || 'ACTIVE',
+      commentaire:     commentaire     || '',
+    });
+
+    // Populer pour retourner les infos lisibles
+    const populated = await Grade.findById(grade._id)
+      .populate('coursId',    'intitule code')
+      .populate('etudiantId', 'nom prenom email');
+
+    return res.status(201).json({ success: true, grade: populated });
+
+  } catch (err) {
+    console.error('createGrade error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  GET /api/grades/my  → toutes les notes du professeur connecté
+// ─────────────────────────────────────────────────────────────
+exports.getMyGrades = async (req, res) => {
+  try {
+    const professor = await Professor.findOne({ utilisateurId: req.user.id });
+    if (!professor) {
+      return res.status(404).json({ success: false, error: 'Profil professeur non trouvé' });
+    }
+
+    const grades = await Grade.find({ professeurId: professor._id })
+      .populate('coursId',    'intitule code')
+      .populate('etudiantId', 'nom prenom email')
+      .sort({ createdAt: -1 });
+
+    return res.json({ success: true, grades });
+
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  DELETE /api/grades/:id  → supprimer une évaluation
+// ─────────────────────────────────────────────────────────────
+exports.deleteGrade = async (req, res) => {
+  try {
+    await Grade.findByIdAndDelete(req.params.id);
+    return res.json({ success: true, message: 'Évaluation supprimée' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  GET /api/grades/students-for-course/:courseId
+//  → étudiants inscrits à ce cours (pour le select)
+// ─────────────────────────────────────────────────────────────
+exports.getStudentsForCourse = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.courseId)
+      .populate({
+        path:     'etudiantsInscrits',
+        populate: { path: 'utilisateurId', select: 'nom prenom email' },
+      });
+
+    if (!course) {
+      return res.status(404).json({ success: false, error: 'Cours non trouvé' });
+    }
+
+    // Retourner les User ids + infos nom/prenom
+    const students = await User.find({
+      _id: { $in: course.etudiantsInscrits },
+      role: 'ETUDIANT',
+    }).select('nom prenom email').lean();
+
+    const formatted = students.map((s) => ({
+      id:     String(s._id),
+      nom:    s.nom,
+      prenom: s.prenom,
+      email:  s.email,
+    }));
+
+    return res.json({ success: true, students: formatted });
+
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
