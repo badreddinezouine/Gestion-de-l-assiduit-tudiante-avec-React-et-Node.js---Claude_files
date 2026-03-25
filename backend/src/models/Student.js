@@ -2,38 +2,28 @@ const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
   utilisateurId: {
-    type:     mongoose.Schema.Types.ObjectId,
-    ref:      'User',
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    unique:   true
+    unique: true
   },
-  numeroEtudiant: {
-    type:   String,
+  cne: {
+    type: String,
     unique: true,
-    sparse: true  // ✅ unique mais pas required (généré auto)
-  },
-  niveau: {
-    type:    String,
-    enum:    ['LICENCE1', 'LICENCE2', 'LICENCE3', 'MASTER1', 'MASTER2'],
-    required: [true, 'Le niveau est obligatoire'], // ✅ required
+    sparse: true
   },
   filiere: {
-    type:     String,
-    required: [true, 'La filière est obligatoire'], // ✅ required
-    trim:     true
+    type: String,
+    required: true
   },
-  dateNaissance: {
-    type:    Date,
-    default: null
+  niveau: {
+    type: String,
+    required: true
   },
-  groupe: {
-    type:    String,
-    default: ''
-  },
-  coursInscrits: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref:  'Course'
-  }]
+  actif: {
+    type: Boolean,
+    default: true
+  }
 }, {
   timestamps: true
 });

@@ -21,11 +21,12 @@ app.get('/api/test', (req, res) => {
 // Routes
 app.use('/api/auth',        require('./src/routes/auth.routes'));
 app.use('/api/courses',     require('./src/routes/course.routes'));
-app.use('/api/grades',      require('./src/routes/grade.routes'));       // ✅ NOUVEAU
+app.use('/api/grades',      require('./src/routes/grade.routes'));
 app.use('/api/attendance',  require('./src/routes/attendance.routes'));
 app.use('/api/statistics',  require('./src/routes/statistics.routes'));
 app.use('/api/qr',          require('./src/routes/qr.routes'));
 app.use('/api/adaptation',  require('./src/routes/adaptation.routes'));
+app.use('/api/students',    require('./src/routes/student.routes'));  // ✅ CORRIGÉ
 
 const mongoUri = process.env.MONGODB_URI;
 if (!mongoUri) { console.log('⚠️  MONGODB_URI manquant'); process.exit(1); }

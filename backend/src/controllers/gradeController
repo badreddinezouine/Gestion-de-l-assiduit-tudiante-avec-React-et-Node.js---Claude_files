@@ -2,6 +2,7 @@ const Grade     = require('../models/Grade');
 const Course    = require('../models/Course');
 const Professor = require('../models/Professor');
 const User      = require('../models/User');
+const Student   = require('../models/Student'); // ✅ AJOUTÉ
 
 // ─────────────────────────────────────────────────────────────
 //  POST /api/grades  → créer une évaluation
@@ -79,35 +80,52 @@ exports.deleteGrade = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 //  GET /api/grades/students-for-course/:courseId
 //  → étudiants inscrits à ce cours (pour le select)
+//  ✅ ✅ ✅ VERSION CORRIGÉE ✅ ✅ ✅
 // ─────────────────────────────────────────────────────────────
 exports.getStudentsForCourse = async (req, res) => {
   try {
+    // ✅ Charger le cours avec populate Student → User
     const course = await Course.findById(req.params.courseId)
       .populate({
-        path:     'etudiantsInscrits',
-        populate: { path: 'utilisateurId', select: 'nom prenom email' },
+        path: 'etudiantsInscrits',      // ← Student documents
+        populate: {
+          path: 'utilisateurId',        // ← User documents
+          select: 'nom prenom email'
+        }
       });
 
     if (!course) {
       return res.status(404).json({ success: false, error: 'Cours non trouvé' });
     }
 
-    // Retourner les User ids + infos nom/prenom
-    const students = await User.find({
-      _id: { $in: course.etudiantsInscrits },
-      role: 'ETUDIANT',
-    }).select('nom prenom email').lean();
+    // ✅ Formater les données pour le frontend
+    const formatted = course.etudiantsInscrits
+      .filter(student => student && student.utilisateurId) // Filtrer les null/undefined
+      .map(student => ({
+        id: String(student.utilisateurId._id),     // ← ID du User (pour etudiantId dans Grade)
+        nom: student.utilisateurId.nom,
+        prenom: student.utilisateurId.prenom,
+        email: student.utilisateurId.email,
+      }));
 
-    const formatted = students.map((s) => ({
-      id:     String(s._id),
-      nom:    s.nom,
-      prenom: s.prenom,
-      email:  s.email,
-    }));
+    // ✅ Logs pour débogage
+    console.log('─────────────────────────────────────────────────────');
+    console.log(`📚 Cours sélectionné: ${course.intitule} (${course.code})`);
+    console.log(`👥 Nombre d'étudiants inscrits: ${formatted.length}`);
+    if (formatted.length > 0) {
+      console.log('📋 Liste des étudiants:');
+      formatted.forEach((s, i) => {
+        console.log(`   ${i + 1}. ${s.prenom} ${s.nom} (${s.email})`);
+      });
+    } else {
+      console.log('⚠️  Aucun étudiant inscrit à ce cours');
+    }
+    console.log('─────────────────────────────────────────────────────');
 
     return res.json({ success: true, students: formatted });
 
   } catch (err) {
+    console.error('❌ getStudentsForCourse error:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 };

@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const attendanceSchema = new mongoose.Schema({
   studentId: {
@@ -33,9 +33,8 @@ const attendanceSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour éviter les doublons
 attendanceSchema.index({ studentId: 1, courseId: 1, date: 1 }, { unique: true });
 
 const Attendance = mongoose.model('Attendance', attendanceSchema);
 
-export default Attendance;
+module.exports = Attendance;

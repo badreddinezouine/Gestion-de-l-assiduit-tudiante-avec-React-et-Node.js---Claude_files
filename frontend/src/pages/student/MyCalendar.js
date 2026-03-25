@@ -1,28 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Container,
-  Typography,
-  Box,
-  Paper,
-  TextField,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Chip,
-  Alert,
+  Container, Typography, Box, Paper, TextField, Table, 
+  TableHead, TableRow, TableCell, TableBody, Chip, Alert, CircularProgress
 } from '@mui/material';
-import { useAuth } from '../../context/AuthContext';
-
-const loadLS = (key, fallback) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-};
+import { studentService } from '../../services/studentService';
 
 const formatDateTime = (iso) => {
   const dt = new Date(iso);
@@ -36,43 +17,54 @@ const formatDateTime = (iso) => {
 };
 
 export default function MyCalendar() {
-  const { user } = useAuth();
-  const studentId = user?.id || '2';
-
-  const courses = loadLS('pfe_courses', []);
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [courseFilter, setCourseFilter] = useState('ALL');
 
-  // sessions for courses where student is enrolled
-  const sessions = useMemo(() => {
-    const list = [];
-    (Array.isArray(courses) ? courses : []).forEach((c) => {
-      const enrolled = (c.etudiants || []).includes(studentId);
-      if (!enrolled) return;
+  // ✅ Charger les sessions depuis l'API
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await studentService.getMyCalendar();
+        setSessions(data);
+      } catch (err) {
+        setError(err.response?.data?.error || 'Erreur de chargement du calendrier');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
-      (c.sessions || []).forEach((s) => {
-        list.push({
-          courseId: c.id,
-          intitule: c.intitule,
-          code: c.code,
-          dateDebut: s.dateDebut,
-          duree: s.duree,
-          salle: s.salle,
-          sessionId: s.id,
-        });
-      });
-    });
-
-    return list.sort((a, b) => new Date(a.dateDebut) - new Date(b.dateDebut));
-  }, [courses, studentId]);
-
+  // Liste des cours uniques pour le filtre
   const courseOptions = useMemo(() => {
-    return (Array.isArray(courses) ? courses : []).filter((c) => (c.etudiants || []).includes(studentId));
-  }, [courses, studentId]);
+    const unique = new Map();
+    sessions.forEach(s => {
+      if (!unique.has(s.courseId)) {
+        unique.set(s.courseId, {
+          id: s.courseId,
+          name: s.courseName,
+          code: s.courseCode,
+        });
+      }
+    });
+    return Array.from(unique.values());
+  }, [sessions]);
 
+  // Sessions filtrées
   const filtered = useMemo(() => {
     if (courseFilter === 'ALL') return sessions;
     return sessions.filter((s) => s.courseId === courseFilter);
   }, [sessions, courseFilter]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Container maxWidth="lg">
@@ -81,10 +73,14 @@ export default function MyCalendar() {
           Mon Calendrier
         </Typography>
 
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Mode démo : les séances viennent de <b>Gestion des cours</b> (localStorage).
+        {/* ✅ Plus de localStorage */}
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Les séances sont chargées depuis <b>MongoDB Atlas</b>.
         </Alert>
 
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+        {/* Filtre par cours */}
         <Paper sx={{ p: 2, mb: 2 }}>
           <TextField
             select
@@ -92,19 +88,21 @@ export default function MyCalendar() {
             label="Filtrer par cours"
             value={courseFilter}
             onChange={(e) => setCourseFilter(e.target.value)}
+            SelectProps={{ native: true }}
           >
             <option value="ALL">Tous</option>
             {courseOptions.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.intitule} ({c.code})
+                {c.name} ({c.code})
               </option>
             ))}
           </TextField>
         </Paper>
 
+        {/* Tableau des séances */}
         <Paper sx={{ p: 2 }}>
           <Typography variant="h6" gutterBottom>
-            Séances à venir / programmées
+            Séances à venir / programmées ({filtered.length})
           </Typography>
 
           <Table size="small">
@@ -114,14 +112,13 @@ export default function MyCalendar() {
                 <TableCell>Cours</TableCell>
                 <TableCell>Salle</TableCell>
                 <TableCell>Durée</TableCell>
-                <TableCell>ID séance</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5}>
-                    Aucune séance. (Demande à ton prof de créer des séances dans Gestion des cours)
+                  <TableCell colSpan={4} sx={{ textAlign: 'center', color: 'text.secondary' }}>
+                    Aucune séance programmée pour le moment
                   </TableCell>
                 </TableRow>
               ) : (
@@ -129,13 +126,10 @@ export default function MyCalendar() {
                   <TableRow key={s.sessionId}>
                     <TableCell>{formatDateTime(s.dateDebut)}</TableCell>
                     <TableCell>
-                      {s.intitule} <Chip size="small" label={s.code} sx={{ ml: 1 }} />
+                      {s.courseName} <Chip size="small" label={s.courseCode} sx={{ ml: 1 }} />
                     </TableCell>
                     <TableCell>{s.salle}</TableCell>
                     <TableCell>{s.duree} min</TableCell>
-                    <TableCell>
-                      <Chip size="small" label={s.sessionId} />
-                    </TableCell>
                   </TableRow>
                 ))
               )}
